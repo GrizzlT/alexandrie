@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use semver::{Version, VersionReq};
@@ -16,12 +16,12 @@ pub struct Git2Index {
     /// The path of the crate index.
     pub(crate) repo: Mutex<git2::Repository>,
     tree: Tree,
-    ssh_private_key: Option<Path>,
+    ssh_private_key: Option<PathBuf>,
 }
 
 impl Git2Index {
     /// Create a Git2Index instance with the given path.
-    pub fn new<P1: Into<PathBuf>, P2: Into<Path>>(path: P1, ssh_private_key: Option<P2>) -> Result<Git2Index, Error> {
+    pub fn new<P1: Into<PathBuf>, P2: Into<PathBuf>>(path: P1, ssh_private_key: Option<P2>) -> Result<Git2Index, Error> {
         let path = path.into();
         let repo = git2::Repository::open(&path)?;
         let repo = Mutex::new(repo);
@@ -36,7 +36,7 @@ impl Git2Index {
 /// This is inspired by [the way Cargo handles this][cargo-impl].
 ///
 /// [cargo-impl]: https://github.com/rust-lang/cargo/blob/94bf4781d0bbd266abe966c6fe1512bb1725d368/src/cargo/sources/git/utils.rs#L437
-fn with_credentials<F, T>(repo: &git2::Repository, ssh_private_key: Option<Path>, mut f: F) -> Result<T, git2::Error>
+fn with_credentials<F, T>(repo: &git2::Repository, ssh_private_key: Option<&Path>, mut f: F) -> Result<T, git2::Error>
 where
     F: FnMut(&mut git2::Credentials) -> Result<T, git2::Error>,
 {
@@ -53,8 +53,8 @@ where
 
         if allowed.contains(git2::CredentialType::SSH_KEY) && !tried_sshkey {
             let username = username.unwrap();
-            let cred = if let Some(private_key) = &ssh_private_key {
-                git2::Cred::ssh_key(username, None, private_key, None);
+            let cred = if let Some(private_key) = ssh_private_key {
+                git2::Cred::ssh_key(username, None, private_key, None)
             } else {
                 git2::Cred::ssh_key_from_agent(username)
             };
@@ -94,7 +94,7 @@ impl Indexer for Git2Index {
             .ok_or_else(|| git2::Error::from_str("detached HEAD not supported"))?;
         let branch_name = branch.name()?.expect("branch name is invalid UTF-8");
 
-        with_credentials(&repo, self.ssh_private_key.as_ref().cloned(), |cred_callback| {
+        with_credentials(&repo, self.ssh_private_key.as_ref().map(|path| path.as_path()), |cred_callback| {
             let mut opts = git2::FetchOptions::new();
             let mut callbacks = git2::RemoteCallbacks::new();
             callbacks.credentials(cred_callback);
